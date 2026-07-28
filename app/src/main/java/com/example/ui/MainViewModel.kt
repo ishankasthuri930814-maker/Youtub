@@ -241,20 +241,126 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Download state
+    private val _downloadProgress = MutableStateFlow<Int?>(null)
+    val downloadProgress = _downloadProgress.asStateFlow()
+
+    private val _downloadingTitle = MutableStateFlow("")
+    val downloadingTitle = _downloadingTitle.asStateFlow()
+
+    // Offline Player State
+    private var mediaPlayer: android.media.MediaPlayer? = null
+
+    private val _offlinePlayingItem = MutableStateFlow<MediaItem?>(null)
+    val offlinePlayingItem = _offlinePlayingItem.asStateFlow()
+
+    private val _offlineIsPlaying = MutableStateFlow(false)
+    val offlineIsPlaying = _offlineIsPlaying.asStateFlow()
+
+    private val _offlinePositionMs = MutableStateFlow(0L)
+    val offlinePositionMs = _offlinePositionMs.asStateFlow()
+
+    private val _offlineDurationMs = MutableStateFlow(0L)
+    val offlineDurationMs = _offlineDurationMs.asStateFlow()
+
     fun saveCurrentPageOffline() {
         viewModelScope.launch {
+            val title = _currentTitle.value
+            val url = _currentUrl.value
+            _downloadingTitle.value = title
+            _downloadProgress.value = 5
+
+            val file = com.example.media.AudioDownloader.downloadAudioMp3(
+                context = getApplication(),
+                url = url,
+                title = title,
+                onProgress = { progress ->
+                    _downloadProgress.value = progress
+                }
+            )
+
             val item = MediaItem(
-                title = _currentTitle.value,
-                url = _currentUrl.value,
-                thumbnailUrl = extractYouTubeThumbnail(_currentUrl.value),
-                isDownloaded = true
+                title = title,
+                url = url,
+                thumbnailUrl = extractYouTubeThumbnail(url),
+                isDownloaded = true,
+                localFilePath = file?.absolutePath
             )
             repository.saveMediaItem(item)
+
+            kotlinx.coroutines.delay(1000)
+            _downloadProgress.value = null
+        }
+    }
+
+    fun playOfflineMediaItem(item: MediaItem) {
+        val path = item.localFilePath
+        if (path != null && java.io.File(path).exists()) {
+            try {
+                mediaPlayer?.release()
+                mediaPlayer = android.media.MediaPlayer().apply {
+                    setDataSource(path)
+                    prepare()
+                    start()
+                }
+                _offlinePlayingItem.value = item
+                _offlineIsPlaying.value = true
+                _offlineDurationMs.value = mediaPlayer?.duration?.toLong() ?: 0L
+                startOfflineProgressTimer()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                navigateToUrl(item.url)
+            }
+        } else {
+            navigateToUrl(item.url)
+        }
+    }
+
+    fun toggleOfflinePlayPause() {
+        mediaPlayer?.let { player ->
+            if (player.isPlaying) {
+                player.pause()
+                _offlineIsPlaying.value = false
+            } else {
+                player.start()
+                _offlineIsPlaying.value = true
+            }
+        }
+    }
+
+    fun seekOfflineTo(positionMs: Long) {
+        try {
+            mediaPlayer?.seekTo(positionMs.toInt())
+            _offlinePositionMs.value = positionMs
+        } catch (e: Exception) {}
+    }
+
+    private fun startOfflineProgressTimer() {
+        viewModelScope.launch {
+            while (_offlineIsPlaying.value && mediaPlayer != null) {
+                try {
+                    _offlinePositionMs.value = mediaPlayer?.currentPosition?.toLong() ?: 0L
+                } catch (e: Exception) {}
+                kotlinx.coroutines.delay(500)
+            }
         }
     }
 
     fun deleteMediaItem(item: MediaItem) {
         viewModelScope.launch {
+            item.localFilePath?.let { path ->
+                try {
+                    val file = java.io.File(path)
+                    if (file.exists()) file.delete()
+                } catch (e: Exception) {}
+            }
+            if (_offlinePlayingItem.value?.id == item.id) {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+                mediaPlayer = null
+                _offlinePlayingItem.value = null
+                _offlineIsPlaying.value = false
+            }
             repository.deleteMediaItem(item)
         }
     }
@@ -263,6 +369,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deletePlaylist(playlist)
         }
+    }
+
+    override fun onCleared() {
+        mediaPlayer?.release()
+        mediaPlayer = null
+        super.onCleared()
     }
 
     private fun extractYouTubeThumbnail(url: String): String {

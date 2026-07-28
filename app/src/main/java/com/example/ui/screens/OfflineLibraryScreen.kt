@@ -19,15 +19,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +59,14 @@ fun OfflineLibraryScreen(
     modifier: Modifier = Modifier
 ) {
     val downloadedItems by viewModel.downloadedItems.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadingTitle by viewModel.downloadingTitle.collectAsState()
+
+    val offlinePlayingItem by viewModel.offlinePlayingItem.collectAsState()
+    val offlineIsPlaying by viewModel.offlineIsPlaying.collectAsState()
+    val offlinePositionMs by viewModel.offlinePositionMs.collectAsState()
+    val offlineDurationMs by viewModel.offlineDurationMs.collectAsState()
+
     var searchQuery by remember { mutableStateOf("") }
 
     val filteredItems = downloadedItems.filter {
@@ -67,23 +79,65 @@ fun OfflineLibraryScreen(
             .padding(16.dp)
     ) {
         Text(
-            text = "Offline Audio Library",
+            text = "Offline MP3 Library",
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onBackground
         )
 
         Text(
-            text = "Saved media streams for offline listening",
+            text = "Downloaded MP3 tracks for screen-off & offline listening",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // Active Download Banner
+        downloadProgress?.let { progress ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.DownloadForOffline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Downloading MP3: $downloadingTitle",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "$progress%",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search offline tracks...") },
+            placeholder = { Text("Search offline MP3 tracks...") },
             leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
             singleLine = true,
             modifier = Modifier
@@ -115,7 +169,7 @@ fun OfflineLibraryScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Save videos or streams from the Browser to listen offline anytime!",
+                        text = "Tap 'Save Offline' in the browser to download MP3 tracks!",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -129,9 +183,79 @@ fun OfflineLibraryScreen(
                 items(filteredItems) { item ->
                     OfflineItemCard(
                         item = item,
-                        onPlay = { onPlayTrackUrl(item.url) },
+                        onPlay = {
+                            if (item.localFilePath != null) {
+                                viewModel.playOfflineMediaItem(item)
+                            } else {
+                                onPlayTrackUrl(item.url)
+                            }
+                        },
                         onDelete = { viewModel.deleteMediaItem(item) }
                     )
+                }
+            }
+        }
+
+        // Active Offline MP3 Audio Controller
+        offlinePlayingItem?.let { playingItem ->
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = playingItem.title,
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Playing Local Offline MP3",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+
+                        IconButton(onClick = { viewModel.toggleOfflinePlayPause() }) {
+                            Icon(
+                                imageVector = if (offlineIsPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play/Pause",
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+
+                    if (offlineDurationMs > 0) {
+                        Slider(
+                            value = offlinePositionMs.toFloat(),
+                            onValueChange = { viewModel.seekOfflineTo(it.toLong()) },
+                            valueRange = 0f..offlineDurationMs.toFloat(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatTimeMs(offlinePositionMs),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = formatTimeMs(offlineDurationMs),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -191,8 +315,8 @@ fun OfflineItemCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Saved Offline",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = if (item.localFilePath != null) "Downloaded MP3" else "Saved Stream",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.secondary
                     )
                 }
@@ -218,3 +342,11 @@ fun OfflineItemCard(
         }
     }
 }
+
+fun formatTimeMs(timeMs: Long): String {
+    val totalSeconds = timeMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
+}
+

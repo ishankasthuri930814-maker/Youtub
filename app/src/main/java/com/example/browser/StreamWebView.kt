@@ -115,6 +115,16 @@ fun StreamWebView(
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
                         url?.let { onUrlChanged(it) }
+                        view?.evaluateJavascript(AdBlockEngine.AD_BLOCK_AND_BACKGROUND_JS, null)
+                    }
+
+                    override fun onLoadResource(view: WebView?, url: String?) {
+                        super.onLoadResource(view, url)
+                        if (isAdBlockEnabled && url != null && AdBlockEngine.isAdUrl(url)) {
+                            onAdBlocked()
+                        } else {
+                            view?.evaluateJavascript(AdBlockEngine.AD_BLOCK_AND_BACKGROUND_JS, null)
+                        }
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
